@@ -71,7 +71,7 @@ class LGFX : public lgfx::LGFX_Device {
       auto cfg = _bus.config();
       cfg.spi_host    = SPI3_HOST;          // = VSPI
       cfg.spi_mode    = 0;
-      cfg.freq_write  = 40000000;
+      cfg.freq_write  = 20000000;           // 40 MHz er for raskt gjennom nivåomformeren på Adafruit-kortet
       cfg.freq_read   = 16000000;
       cfg.spi_3wire   = false;
       cfg.use_lock    = true;
@@ -547,6 +547,7 @@ static void waitForTime(uint32_t timeoutMs) {
 void setup() {
   Serial.begin(115200);
 
+  delay(300);                      // la skjermens spenning stabilisere seg etter kald oppstart
   tft.init();
   tft.setRotation(1);              // liggende 320x240
   tft.setBrightness(BL_DAY);
