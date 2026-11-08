@@ -36,9 +36,11 @@
 
 ## Designkrav (avtalt med eieren, skal beholdes)
 - Mørk bakgrunn, Apple-inspirert stil med iOS dark mode-farger og B612-font overalt.
-- Stort **hvitt** tall med **én desimal**, norsk komma og «°C», alt i **samme fontstørrelse** som én enkel tekst uten mellomrom (f.eks. «9,8°C»). Ingen opphøyde/mindre deler. FONT_BIG er 76 px: «−30,0°C» er 271 px bred og får ≥ 20 px margin på 320 px (B612 har like brede tegn).
+- Stort **hvitt** tall med **én desimal**, norsk komma og «°C», alt i **samme fontstørrelse** som én enkel tekst uten mellomrom (f.eks. «9,8°C»). Ingen opphøyde/mindre deler. FONT_BIG (temperaturen) er 36 px (var 76 px før klokken kom): «−30,0°C» er 131 px bred (B612 har like brede sifre).
+- Stor klokke **HH:MM:SS** over temperaturen, FONT_CLOCK 54 px («23:59:59» = 242 px), lys grå (`C_CLOCK`). Bare klokkesonen tegnes på nytt hvert sekund. Nettverket (WiFi/Homey) går i en egen FreeRTOS-task, så klokken ikke fryser når WiFi henger.
 - Diskret 24-timers trend under tallet: tynn kantutjevnet kurve, **rød over 0°, blå under 0°**, svak gradient under, stiplet nullinje og prikk for «nå». Trenden er godkjent og skal ikke endres.
-- Topplinje: «Ute» til venstre, «H x°  L y°» til høyre. En oransje prikk vises etter 10 min uten data.
+- Ukedag på norsk i versaler («SØNDAG») sentrert over klokken, FONT_DAY 20 px, samme lyse grå som klokken (`C_CLOCK`). Ingen «Ute»-etikett. En oransje prikk vises øverst til venstre etter 10 min uten data.
+- «H x,x°» og «L y,y°» (én desimal, grå, 15 px) står stablet til høyre for temperaturen: H flukter med toppen av sifrene, L med grunnlinjen. Temperatur + H/L sentreres som én gruppe.
 - Dimming kl. 23–06.
 
 ## Kjente usikkerheter

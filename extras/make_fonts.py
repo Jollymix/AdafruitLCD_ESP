@@ -7,7 +7,9 @@ from vlwgen import build_vlw, to_c_array
 D = (sys.argv[1] if len(sys.argv) > 1 else HERE) + "/"
 TXT = "".join(chr(c) for c in range(0x20, 0x7F)) + "°−æøåÆØÅ·…"
 fonts = [
-    ("FONT_BIG",   D + "B612-Regular.ttf",  76, "0123456789−,°C"),  # "−30,0°C" = 271 px, 24 px margin
+    ("FONT_BIG",   D + "B612-Regular.ttf",  36, "0123456789−,°C"),  # temperatur: "−30,0°C" = 131 px
+    ("FONT_CLOCK", D + "B612-Regular.ttf",  54, "0123456789:−"),    # klokke: "23:59:59" = 242 px
+    ("FONT_DAY",   D + "B612-Regular.ttf",  20, "MANDGTIRSOFELØ"),     # ukedag i versaler: "TORSDAG"
     ("FONT_SMALL", D + "B612-Regular.ttf",  15, TXT),
     ("FONT_TINY",  D + "B612-Regular.ttf",  11, TXT),
 ]

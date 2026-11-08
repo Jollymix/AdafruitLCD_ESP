@@ -41,7 +41,6 @@ const char* HOMEY_IP    = HOMEY_IP_SECRET;
 const char* HOMEY_TOKEN = HOMEY_TOKEN_SECRET;
 const char* DEVICE_ID   = DEVICE_ID_SECRET;
 
-const char* LABEL       = "Ute";
 
 const uint32_t POLL_MS        = 60UL * 1000;       // hent temperatur hvert minutt
 const uint32_t STALE_MS       = 10UL * 60 * 1000;  // oransje prikk etter 10 min uten data
@@ -146,14 +145,20 @@ static const uint32_t C_GRAY     = 0x8E8E93;  // secondaryLabel
 static const uint32_t C_GRAY_DIM = 0x48484A;  // tertiary
 static const uint32_t C_ORANGE   = 0xFF9F0A;  // systemOrange
 static const uint32_t C_NUMBER   = C_WHITE;   // farge på det store tallet
+static const uint32_t C_CLOCK    = 0xD1D1D6;  // klokke: lys grå, litt under tallet
 
 // Soner (y-område) – tegnes hver for seg i en sprite for flimmerfri oppdatering
-static const int HDR_Y = 0,   HDR_H = 40;   // "Ute"  +  H / L
-static const int NUM_Y = 40,  NUM_H = 132;  // stort tall
+static const int HDR_Y = 0,   HDR_H = 46;   // ukedag  (+ oransje prikk)
+static const int CLK_Y = 46,  CLK_H = 58;   // klokke med sekunder
+static const int NUM_Y = 104, NUM_H = 68;   // temperatur  +  H / L til høyre
 static const int CH_Y  = 172, CH_H  = 68;   // trend + akse-tekst
 
-static const int HDR_BASE = 30;   // grunnlinjer i skjermkoordinater
-static const int BIG_BASE = 136;  // 76 px-font (sifferhøyde 58) sentrert i tallsonen
+static const int HDR_BASE = 38;   // grunnlinjer i skjermkoordinater; 20 px-font (høyde 15)
+static const int CLK_BASE = 95;   // 54 px-font (sifferhøyde 41)
+static const int BIG_BASE = 147;  // 36 px-font (sifferhøyde 27)
+static const int HL_H_BASE = BIG_BASE - 27 + 11;  // "H" flukter med toppen av tallet (15 px-font, høyde 11)
+static const int HL_L_BASE = BIG_BASE;            // "L" flukter med grunnlinjen
+static const int HL_GAP    = 12;                  // luft mellom tallet og H/L
 static const int CH_TOP   = 176;
 static const int CH_BOT   = 214;
 static const int LBL_BASE = 232;
@@ -199,11 +204,10 @@ static void blendPx(LGFX_Sprite& s, int x, int y, uint32_t c, float a) {
   s.drawPixel(x, y, lgfx::color565(r, g, b));
 }
 
+// Én desimal, norsk komma og ekte minustegn: "−12,3"
 static String fmtTemp(float v) {
-  long n = lroundf(v);
-  String s = (n < 0) ? "−" : "";   // ekte minustegn
-  s += String(labs(n));
-  return s;
+  long n10 = lroundf(v * 10.0f);
+  return String(n10 < 0 ? "−" : "") + String(labs(n10) / 10) + "," + String(labs(n10) % 10);
 }
 
 // ---------------------------------------------------------------------
@@ -327,20 +331,28 @@ static bool prefillFromInsights() {
 // ---------------------------------------------------------------------
 //  Tegning
 // ---------------------------------------------------------------------
-static void drawHeader(bool stale, bool haveHL, float hi, float lo) {
+static void drawHeader(bool stale) {
   LGFX_Sprite s(&tft);
   s.setColorDepth(16);
   if (!s.createSprite(W, HDR_H)) return;
   s.fillSprite(rgb565(C_BG));
-  s.loadFont(FONT_SMALL);
-  s.setTextDatum(textdatum_t::baseline_left);
   const int base = HDR_BASE - HDR_Y;
 
-  s.setTextColor(rgb565(C_GRAY));
-  s.drawString(LABEL, M, base);
+  if (timeValid()) {  // ukedag sentrert over klokken
+    static const char* const DAYS[] = {"SØNDAG", "MANDAG", "TIRSDAG", "ONSDAG",
+                                       "TORSDAG", "FREDAG", "LØRDAG"};
+    time_t now = time(nullptr);
+    struct tm lt;
+    localtime_r(&now, &lt);
+    s.loadFont(FONT_DAY);
+    s.setTextDatum(textdatum_t::baseline_left);
+    s.setTextColor(rgb565(C_CLOCK));      // samme lyse grå som klokken
+    s.drawString(DAYS[lt.tm_wday], (W - s.textWidth(DAYS[lt.tm_wday])) / 2, base);
+    s.unloadFont();
+  }
 
-  if (stale) {  // diskret oransje prikk etter etiketten
-    float cx = M + s.textWidth(LABEL) + 8.5f, cy = base - 5.5f;
+  if (stale) {  // diskret oransje prikk øverst til venstre
+    float cx = M + 3.5f, cy = base - 7.5f;
     for (int y = (int)cy - 5; y <= (int)cy + 5; y++)
       for (int x = (int)cx - 5; x <= (int)cx + 5; x++) {
         float d = hypotf(x + 0.5f - cx, y + 0.5f - cy);
@@ -348,23 +360,56 @@ static void drawHeader(bool stale, bool haveHL, float hi, float lo) {
       }
   }
 
-  if (haveHL) {
-    String hl = "H " + fmtTemp(hi) + "°   L " + fmtTemp(lo) + "°";
-    s.drawString(hl, W - M - s.textWidth(hl), base);
-  }
-  s.unloadFont();
   s.pushSprite(0, HDR_Y);
   s.deleteSprite();
 }
 
-static void drawNumber(float t) {
+// "14:05:09" – B612 har like brede sifre, så teksten står stille når sekundene går
+static void drawClock() {
+  LGFX_Sprite s(&tft);
+  s.setColorDepth(16);
+  if (!s.createSprite(W, CLK_H)) { Serial.println("[gfx] lite minne (klokke)"); return; }
+  s.fillSprite(rgb565(C_BG));
+  s.loadFont(FONT_CLOCK);
+  s.setTextDatum(textdatum_t::baseline_left);
+
+  char txt[24];
+  if (timeValid()) {
+    time_t now = time(nullptr);
+    struct tm lt;
+    localtime_r(&now, &lt);
+    snprintf(txt, sizeof(txt), "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
+    s.setTextColor(rgb565(C_CLOCK));
+  } else {                              // ingen NTP-tid ennå
+    strcpy(txt, "−−:−−:−−");
+    s.setTextColor(rgb565(C_GRAY_DIM));
+  }
+  s.drawString(txt, (W - s.textWidth(txt)) / 2, CLK_BASE - CLK_Y);
+
+  s.unloadFont();
+  s.pushSprite(0, CLK_Y);
+  s.deleteSprite();
+}
+
+// Temperaturen med H (øverst) og L (nederst) stablet til høyre; hele gruppen sentreres
+static void drawNumber(float t, bool haveHL, float hi, float lo) {
   LGFX_Sprite s(&tft);
   s.setColorDepth(16);
   if (!s.createSprite(W, NUM_H)) { Serial.println("[gfx] lite minne (tall)"); return; }
   s.fillSprite(rgb565(C_BG));
-  s.loadFont(FONT_BIG);
   s.setTextDatum(textdatum_t::baseline_left);
   const int base = BIG_BASE - NUM_Y;
+
+  String hTxt, lTxt;
+  int hlW = 0;
+  if (haveHL) {
+    hTxt = "H " + fmtTemp(hi) + "°";
+    lTxt = "L " + fmtTemp(lo) + "°";
+    s.loadFont(FONT_SMALL);
+    hlW = max(s.textWidth(hTxt), s.textWidth(lTxt));
+    s.unloadFont();
+  }
+  s.loadFont(FONT_BIG);
 
   // Én tekst, én størrelse: "9,8°C" / "−12,3°C"
   String txt;
@@ -372,14 +417,21 @@ static void drawNumber(float t) {
     txt = "−";
     s.setTextColor(rgb565(C_GRAY_DIM));
   } else {
-    long n10 = lroundf(t * 10.0f);
-    txt = String(n10 < 0 ? "−" : "") + String(labs(n10) / 10) + "," +
-          String(labs(n10) % 10) + "°C";
+    txt = fmtTemp(t) + "°C";
     s.setTextColor(rgb565(C_NUMBER));
   }
-  s.drawString(txt, (W - s.textWidth(txt)) / 2, base);
-
+  const int tw = s.textWidth(txt);
+  const int x0 = (W - (tw + (haveHL ? HL_GAP + hlW : 0))) / 2;
+  s.drawString(txt, x0, base);
   s.unloadFont();
+
+  if (haveHL) {
+    s.loadFont(FONT_SMALL);
+    s.setTextColor(rgb565(C_GRAY));
+    s.drawString(hTxt, x0 + tw + HL_GAP, HL_H_BASE - NUM_Y);
+    s.drawString(lTxt, x0 + tw + HL_GAP, HL_L_BASE - NUM_Y);
+    s.unloadFont();
+  }
   s.pushSprite(0, NUM_Y);
   s.deleteSprite();
 }
@@ -504,8 +556,9 @@ static void redraw() {
   }
   if (!isnan(curTemp)) { hi = fmaxf(hi, curTemp); lo = fminf(lo, curTemp); haveHL = true; }
 
-  drawHeader(stale && everOk, haveHL, hi, lo);
-  drawNumber(curTemp);
+  drawHeader(stale && everOk);
+  drawClock();
+  drawNumber(curTemp, haveHL, hi, lo);
   drawChart(timeValid() ? time(nullptr) / SLOT_SEC : 0);
 }
 
@@ -563,6 +616,24 @@ static void waitForTime(uint32_t timeoutMs) {
   while (!timeValid() && millis() - t0 < timeoutMs) delay(200);
 }
 
+// Nettverk i egen task: WiFi-tilkobling og Homey-kall kan blokkere i
+// 5–20 s, og da ville klokken frosset. Tasken sender nye målinger til
+// loop() via en kø; all tegning og historikk skjer i loop().
+static QueueHandle_t tempQ = nullptr;
+
+static void netTask(void*) {
+  TickType_t last = xTaskGetTickCount();
+  for (;;) {
+    connectWiFi();
+    float t;
+    if (WiFi.status() == WL_CONNECTED && fetchTemp(t)) {
+      Serial.printf("[temp] %.1f\n", t);
+      xQueueOverwrite(tempQ, &t);
+    }
+    vTaskDelayUntil(&last, pdMS_TO_TICKS(POLL_MS));
+  }
+}
+
 // ---------------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
@@ -575,6 +646,7 @@ void setup() {
 
   prefs.begin("utetemp", false);
   loadHistory();
+  tempQ = xQueueCreate(1, sizeof(float));
 
   redraw();                        // vis rammen med en gang
 
@@ -593,27 +665,31 @@ void setup() {
   if (timeValid() && validSlots(time(nullptr) / SLOT_SEC) < N_SLOTS / 2)
     prefillFromInsights();
 
-  lastPollMs = millis() - POLL_MS; // hent med en gang
+  // Kjerne 0 (samme som WiFi-stakken); loop() med tegningen går på kjerne 1
+  xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 1, nullptr, 0);
+  lastPollMs = millis() - POLL_MS; // tegn med en gang
 }
 
 void loop() {
-  if (millis() - lastPollMs >= POLL_MS) {
-    lastPollMs = millis();
+  bool fresh = false;
 #if NO_WIFI_TEST
+  if (millis() - lastPollMs >= POLL_MS) {
     curTemp = 5.0f;
     Serial.printf("[test] tegner, oppetid %lu s\n", millis() / 1000);
+  }
 #else
-    connectWiFi();
-
-    float t;
-    if (WiFi.status() == WL_CONNECTED && fetchTemp(t)) {
-      curTemp  = t;
-      lastOkMs = millis();
-      everOk   = true;
-      recordSample(t);
-      Serial.printf("[temp] %.1f\n", t);
-    }
+  float t;
+  if (xQueueReceive(tempQ, &t, 0) == pdTRUE) {
+    curTemp  = t;
+    lastOkMs = millis();
+    everOk   = true;
+    recordSample(t);
+    fresh = true;
+  }
 #endif
+
+  if (fresh || millis() - lastPollMs >= POLL_MS) {
+    lastPollMs = millis();
     // Skjermen mister av og til oppsettet sitt (blir hvit) uten at ESP-en
     // merker det – vi kan ikke lese fra panelet (MISO ikke koblet). Send
     // init-sekvensen på nytt uten reset før hver tegning, så hentes den inn
@@ -624,5 +700,23 @@ void loop() {
     Serial.printf("[mem] fri heap %u, største blokk %u\n",
                   ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   }
-  delay(50);
+
+  // Klokken: tegn bare klokkesonen når sekundet skifter
+  static time_t shown = 0;
+  time_t now = time(nullptr);
+  if (now != shown) {
+    shown = now;
+    drawClock();
+    // Ny dag (midnatt) eller NTP-tid nettopp kommet: tegn alt på nytt så ukedagen stemmer
+    static int shownDay = -1;
+    if (timeValid()) {
+      struct tm lt;
+      localtime_r(&now, &lt);
+      if (lt.tm_wday != shownDay) {
+        lastPollMs = millis() - POLL_MS;   // full tegning ved neste runde
+        shownDay = lt.tm_wday;
+      }
+    }
+  }
+  delay(20);
 }
