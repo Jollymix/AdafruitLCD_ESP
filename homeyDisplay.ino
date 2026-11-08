@@ -58,7 +58,7 @@ const char*    TZ_INFO        = "CET-1CEST,M3.5.0,M10.5.0/3";  // Norge
 #define PIN_MOSI  23
 #define PIN_CS     5
 #define PIN_DC    16
-#define PIN_RST   17
+#define PIN_RST   -1   // RST på skjermen er koblet fast til 3V3 (test nov. 2026), var GPIO17
 #define PIN_BL    21
 // MISO og SD CS brukes ikke. Bind gjerne SD CS til 3V3.
 

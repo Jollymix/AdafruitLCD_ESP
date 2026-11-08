@@ -11,7 +11,7 @@
 | GND | GND |
 | VIN | 3V3 |
 | D/C | GPIO16 |
-| RESET | GPIO17 |
+| RESET | 3V3 (fast, `PIN_RST -1`, test nov. 2026; var GPIO17) |
 | LCD CS | GPIO5 |
 | MOSI | GPIO23 |
 | SCK | GPIO18 |
