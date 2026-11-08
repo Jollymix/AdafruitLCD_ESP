@@ -24,6 +24,10 @@
 #include "fonts.h"
 #include "secrets.h"
 
+// TEST (nov. 2026): 1 = WiFi helt av, fast temperatur, tegner hvert minutt.
+// Brukes for å se om hvit skjerm skyldes WiFi. Sett til 0 for normal drift.
+#define NO_WIFI_TEST 0
+
 // Store glyfer rendres via stacken – gi loop-tasken god plass.
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
@@ -61,8 +65,24 @@ const char*    TZ_INFO        = "CET-1CEST,M3.5.0,M10.5.0/3";  // Norge
 // ---------------------------------------------------------------------
 //  DISPLAY
 // ---------------------------------------------------------------------
+// Sender bare ILI9341-oppsettet på nytt (samme liste som ved oppstart),
+// uten å røre SPI-bussen eller bakgrunnslyset. tft.init_without_reset()
+// initialiserer også PWM-en på nytt, og det slukker lyset på core 3.x.
+class Panel_ILI9341_Re : public lgfx::Panel_ILI9341 {
+ public:
+  void resendInit() {
+    startWrite(true);
+    for (uint8_t i = 0; auto cmds = getInitCommands(i); i++) command_list(cmds);
+    endWrite();
+    setInvert(getInvert());
+    update_madctl();   // fargedybde og rotasjon
+  }
+};
+
 class LGFX : public lgfx::LGFX_Device {
-  lgfx::Panel_ILI9341 _panel;
+ public:
+  Panel_ILI9341_Re _panel;
+ private:
   lgfx::Bus_SPI       _bus;
   lgfx::Light_PWM     _light;
  public:
@@ -71,7 +91,7 @@ class LGFX : public lgfx::LGFX_Device {
       auto cfg = _bus.config();
       cfg.spi_host    = SPI3_HOST;          // = VSPI
       cfg.spi_mode    = 0;
-      cfg.freq_write  = 20000000;           // 40 MHz er for raskt gjennom nivåomformeren på Adafruit-kortet
+      cfg.freq_write  = 10000000;           // 20 MHz ga sporadisk korrupte kommandoer (hvit/speilvendt skjerm), nov. 2026
       cfg.freq_read   = 16000000;
       cfg.spi_3wire   = false;
       cfg.use_lock    = true;
@@ -558,6 +578,14 @@ void setup() {
 
   redraw();                        // vis rammen med en gang
 
+#if NO_WIFI_TEST
+  WiFi.mode(WIFI_OFF);
+  btStop();
+  Serial.println("[test] WiFi AV - fast temperatur, tegner hvert minutt");
+  lastPollMs = millis() - POLL_MS;
+  return;
+#endif
+
   connectWiFi();
   configTzTime(TZ_INFO, "no.pool.ntp.org", "pool.ntp.org");
   waitForTime(10000);
@@ -571,6 +599,10 @@ void setup() {
 void loop() {
   if (millis() - lastPollMs >= POLL_MS) {
     lastPollMs = millis();
+#if NO_WIFI_TEST
+    curTemp = 5.0f;
+    Serial.printf("[test] tegner, oppetid %lu s\n", millis() / 1000);
+#else
     connectWiFi();
 
     float t;
@@ -581,6 +613,12 @@ void loop() {
       recordSample(t);
       Serial.printf("[temp] %.1f\n", t);
     }
+#endif
+    // Skjermen mister av og til oppsettet sitt (blir hvit) uten at ESP-en
+    // merker det – vi kan ikke lese fra panelet (MISO ikke koblet). Send
+    // init-sekvensen på nytt uten reset før hver tegning, så hentes den inn
+    // igjen innen et minutt. Bildeminnet beholdes, så det blinker ikke.
+    tft._panel.resendInit();
     updateBacklight();
     redraw();
     Serial.printf("[mem] fri heap %u, største blokk %u\n",
